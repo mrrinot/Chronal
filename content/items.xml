@@ -1,0 +1,3 @@
+<items gfxroot="gfx/items/" version="2">
+	<active description="Cheers love !" gfx="ChronalAccelerator.png" maxcharges="6" name="Chronal Accelerator" />
+</items>
