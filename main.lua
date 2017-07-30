@@ -39,67 +39,122 @@ end
 
 -- EndRegion Usefull Functions
 
-local	chronal_mod = RegisterMod( "chronal", 1);
+local	chronal_mod = RegisterMod( "Chronal", 1);
 local	chronal_item = Isaac.GetItemIdByName( "Chronal Accelerator" )
 
 local debugText = "null";
-local rewinding = false;
-local rewindFrameCount = 0;
-local rewindMinDuration = 6;
-local lastPos = nil;
 
-local chargeFrameCount = 0;
-
+local lastData = nil;
 local dataQueue = List.new();
 
-function chronal_mod:triggerItem() -- local function which is called whenever we trigger our item (either by using it or by getting hit)
+local chargeFrameCount = 0;
+local rewinding = false;
+local lastFrameRewinding = false;
+local rewindFrameCount = 0;
+local dataGatheringFrequency = 2;
+local framesPerCharge = 15;
+
+function chronal_mod:changePlayerInfos()
   local player = Isaac.GetPlayer(0);
-  rewinding = true;
+  local pPos = player.Position;
+
+  local newPos = Lerp(pPos, lastData.playerInfos.pos, 1 / (framesPerCharge / 3) );
+
+  player.Position = newPos;
+  player.Velocity = lastData.playerInfos.velocity * (-1 / ( framesPerCharge / 3));
+  player:AddCoins(lastData.playerInfos.coinCount - player:GetNumCoins());
+  player:AddBombs(lastData.playerInfos.bombCount - player:GetNumBombs());
+  player:AddKeys(lastData.playerInfos.keyCount - player:GetNumKeys());
+  player:AddHearts(lastData.playerInfos.hearts - player:GetHearts());
+  player:AddBlackHearts(lastData.playerInfos.blackHearts - player:GetBlackHearts());
+  player:AddEternalHearts(lastData.playerInfos.eternalHearts - player:GetEternalHearts());
+  player:AddSoulHearts(lastData.playerInfos.soulHearts - player:GetSoulHearts());
+end
+
+function chronal_mod:changeEntitiesInfos()
+  for k,v in ipairs(Isaac.GetRoomEntities()) do
+    for key,value in pairs(v) do
+      Isaac.DebugString(" found member : ".. key);
+    end
+    Isaac.DebugString("\n");
+  end
 end
 
 function chronal_mod:rewind()
-  local player = Isaac.GetPlayer(0);
-  local pPos = player.Position;
-  if (lastPos == nil) then
-    lastPos = List.popTop(dataQueue);
-    if (lastPos == nil) then return end
+  if (lastData == nil) then
+    lastData = List.popTop(dataQueue);
+    if (lastData == nil) then return end
   end
+  chronal_mod.changePlayerInfos();
+  chronal_mod.changeEntitiesInfos();
+end
 
-  Isaac.DebugString("FROM pos "..lastPos.pos.X.." "..lastPos.pos.Y);
-  Isaac.DebugString("TO pos "..pPos.X.." "..pPos.Y);
-  local newPos = Lerp(pPos, lastPos.pos, 1/6);
-  Isaac.DebugString("newLerpPos = "..newPos.X.." "..newPos.Y.."\n");
-  player.Position = newPos;
+function chronal_mod:evaluateRewinding()
+  player = Isaac.GetPlayer(0);
+  lastFrameRewinding = rewinding;
+
+  if Input.IsActionPressed(ButtonAction.ACTION_ITEM, player.ControllerIndex) and player:GetActiveCharge() > -1 then
+    rewinding = true;
+    player.ControlsEnabled = false;
+  else
+    player.ControlsEnabled = true;
+    rewinding = false; 
+  end
 end
 
 function chronal_mod:onUpdate()
   local player = Isaac.GetPlayer(0);
   debugText = Isaac.GetFrameCount();
 
-  if (rewinding == true) then
-    rewindFrameCount = rewindFrameCount + 1;
-    chronal_mod.rewind();
-  else
-    chargeFrameCount = chargeFrameCount + 1;
-  end
-
-  if (rewindFrameCount >= rewindMinDuration) then
-    Isaac.DebugString("duration = "..rewindFrameCount);
-    rewindFrameCount = 0;
-    rewinding = false;
-    lastPos = nil;
-  end
-
   if (player:HasCollectible(chronal_item)) then
-    if (chargeFrameCount % 6 == 0) then
-      List.push(dataQueue, {pos = player.Position});
-      Isaac.Spawn(EntityType.ENTITY_EFFECT, EffectVariant.CRACK_THE_SKY, 0, player.Position, Vector(0, 0), player);
-      Isaac.DebugString("pushed pos = "..player.Position.X.." "..player.Position.Y);
-      if (dataQueue.size > 50) then
+    chronal_mod.evaluateRewinding();
+
+    if (lastFrameRewinding == false and rewinding == true) then -- First frame rewinding
+      chargeFrameCount = 0;
+      rewindFrameCount = 0;
+--      Isaac.DebugString("Decharging First ! "..rewindFrameCount .. " < = > " .. framesPerCharge);
+      player:SetActiveCharge(player:GetActiveCharge() - 1);
+    elseif (lastFrameRewinding == true and rewinding == false) then -- Not rewinding anymore
+
+    end
+
+    if (lastFrameRewinding == true and rewinding == true and rewindFrameCount % framesPerCharge == 0) then -- Second to last rewinding frame
+--      Isaac.DebugString("Decharging ! "..rewindFrameCount .. " < = > " .. framesPerCharge);
+      player:SetActiveCharge(player:GetActiveCharge() - 1);
+    end
+
+    if (rewinding == true) then -- Every rewinding frame
+      if (rewindFrameCount % (dataGatheringFrequency) == 0) then
+        lastData = nil;
+      end
+      rewindFrameCount = rewindFrameCount + 1;
+      chronal_mod.rewind();
+    else -- Rewinding == FALSE
+      chargeFrameCount = chargeFrameCount + 1;
+    end
+
+    if (chargeFrameCount % dataGatheringFrequency == 0 and chargeFrameCount > dataGatheringFrequency * 10) then
+      local data = {};
+      data.playerInfos = {};
+      data.playerInfos.pos = player.Position;
+      data.playerInfos.hearts = player:GetHearts();
+      data.playerInfos.soulHearts = player:GetSoulHearts();
+      data.playerInfos.eternalHearts = player:GetEternalHearts();
+      data.playerInfos.blackHearts = player:GetBlackHearts();
+      data.playerInfos.coinCount = player:GetNumCoins();
+      data.playerInfos.keyCount = player:GetNumKeys();
+      data.playerInfos.bombCount = player:GetNumBombs();
+      data.playerInfos.orientation = player:GetHeadDirection();
+      data.playerInfos.velocity = player.Velocity;
+      List.push(dataQueue, data);
+      if (dataQueue.size > 6 * framesPerCharge / dataGatheringFrequency) then
         List.popBottom(dataQueue);
       end
     end
   end
+end
+
+function onPostUpdate()
 
 end
 
@@ -107,15 +162,10 @@ function chronal_mod:resetData()
   while (dataQueue.size > 0) do
     List.popTop(dataQueue);
   end
-  end
-
-function chronal_mod:catchUseItem(pl, hook, button)
-  local player = Isaac.GetPlayer(0);
-  if (button == ButtonAction.ACTION_ITEM) then
---      player:SetActiveCharge(player:GetActiveCharge() - 10);
---      chronal_mod.triggerItem();
-    return 1;
-  end
+  rewinding = false;
+  lasData = nil;
+  chargeFrameCount = 0;
+  rewindFrameCount = 0;
 end
 
 -- function chronal_mod:take_damage()
@@ -124,26 +174,38 @@ end
 -- 	end
 -- end
 
-function chronal_mod:debug_text()
-  Isaac.RenderText("Charges: " .. dataQueue.size, 400, 50, 255, 0, 0, 255)
-  Isaac.RenderText("Frame: " .. debugText, 100, 50, 255, 0, 0, 255)
-end
 
 function chronal_mod:onInput(entity, hook, action)
   if (entity ~= nil) then
     local player = entity:ToPlayer();
-    if player and rewinding and hook == InputHook.IS_ACTION_PRESSED then
-      if action ~= ButtonAction.ACTION_ITEM) then
-      return false;
+    if player then
+      if action == ButtonAction.ACTION_ITEM and Input.IsActionPressed(ButtonAction.ACTION_ITEM, player.ControllerIndex) and player:HasCollectible(chronal_item) then
+        return not Input.GetActionValue(ButtonAction.ACTION_ITEM, player.ControllerIndex);
       end
-      end
+
+--      if rewinding and action ~= ButtonAction.ACTION_ITEM then
+--        if hook == InputHook.GET_ACTION_VALUE then 
+--          return 0.0;
+--        elseif hook == InputHook.IS_ACTION_PRESSED then 
+--          return false;
+--        end
+--      end
     end
   end
+end
+
+function chronal_mod:debug_text()
+  local player = Isaac.GetPlayer(0);
+  Isaac.RenderText("Charges: " .. dataQueue.size, 400, 50, 255, 0, 0, 255)
+  Isaac.RenderText("Frame: " .. debugText, 40, 65, 255, 255, 255, 255)
+--  Isaac.RenderText("HP ".. player.HitPoints, 40, 75, 255, 255, 255, 255, 255);
+  Isaac.RenderText("Charged frames ".. chargeFrameCount, 40, 85, 255, 255, 255, 255, 255);
+  Isaac.RenderText("Rewinding frames ".. framesPerCharge, 40, 100, 255, 255, 255, 255, 255);
+  Isaac.RenderText("Rewinding ".. (rewinding == true and '1' or '0'), 400, 65, 255, 255, 255, 255, 255);
+end
 
 chronal_mod:AddCallback(ModCallbacks.MC_INPUT_ACTION, chronal_mod.onInput);
-chronal_mod:AddCallback( ModCallbacks.MC_USE_ITEM, chronal_mod.triggerItem, chronal_item );
---chronal_mod:AddCallback( ModCallbacks.MC_POST_UPDATE, chronal_mod.trackCharges, EntityType.ENTITY_PLAYER );
-chronal_mod:AddCallback( ModCallbacks.MC_POST_PEFFECT_UPDATE, chronal_mod.onUpdate);
+chronal_mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, chronal_mod.onUpdate);
 -- chronal_mod:AddCallback( ModCallbacks.MC_ENTITY_TAKE_DMG, chronal_mod.take_damage, EntityType.ENTITY_PLAYER)
-chronal_mod:AddCallback( ModCallbacks.MC_POST_RENDER, chronal_mod.debug_text);
+chronal_mod:AddCallback(ModCallbacks.MC_POST_RENDER, chronal_mod.debug_text);
 chronal_mod:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, chronal_mod.resetData);
