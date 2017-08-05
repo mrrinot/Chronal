@@ -62,22 +62,49 @@ function chronal_mod:changePlayerInfos()
 
   player.Position = newPos;
   player.Velocity = lastData.playerInfos.velocity * (-1 / ( framesPerCharge / 3));
-  player:AddCoins(lastData.playerInfos.coinCount - player:GetNumCoins());
-  player:AddBombs(lastData.playerInfos.bombCount - player:GetNumBombs());
-  player:AddKeys(lastData.playerInfos.keyCount - player:GetNumKeys());
-  player:AddHearts(lastData.playerInfos.hearts - player:GetHearts());
-  player:AddBlackHearts(lastData.playerInfos.blackHearts - player:GetBlackHearts());
-  player:AddEternalHearts(lastData.playerInfos.eternalHearts - player:GetEternalHearts());
-  player:AddSoulHearts(lastData.playerInfos.soulHearts - player:GetSoulHearts());
+  player:AddCoins(lastData.playerInfos.coinCount - player:GetNumCoins() > 0 and lastData.playerInfos.coinCount - player:GetNumCoins() or 0);
+  player:AddBombs(lastData.playerInfos.bombCount - player:GetNumBombs() > 0 and lastData.playerInfos.bombCount - player:GetNumBombs() or 0);
+  player:AddKeys(lastData.playerInfos.keyCount - player:GetNumKeys() > 0 and lastData.playerInfos.keyCount - player:GetNumKeys() or 0);
+  player:AddHearts(lastData.playerInfos.hearts - player:GetHearts() > 0 and lastData.playerInfos.hearts - player:GetHearts() or 0);
+  local mask;
+  local beforeBHearts = 0;
+  local afterBHearts = 0;
+  mask = lastData.playerInfos.blackHearts;
+  while (mask > 0) do
+    if (mask & 1 == 1) then
+      beforeBHearts = beforeBHearts + 1;
+    end
+    mask = mask >> 1;
+  end
+  mask = player:GetBlackHearts();
+  while (mask > 0) do
+    if (mask & 1 == 1) then
+      afterBHearts = afterBHearts + 1;
+    end
+    mask = mask >> 1;
+  end
+  local beforeSHearts = lastData.playerInfos.soulHearts - beforeBHearts;
+  local afterSHearts = player:GetSoulHearts() - afterBHearts;
+  player:AddSoulHearts(beforeSHearts - afterSHearts > 0 and beforeSHearts - afterSHearts or 0);
+  player:AddBlackHearts(beforeBHearts - afterBHearts > 0 and beforeBHearts - afterBHearts or 0);
+  player:AddEternalHearts(lastData.playerInfos.eternalHearts - player:GetEternalHearts() > 0 and lastData.playerInfos.eternalHearts - player:GetEternalHearts() or 0);
 end
 
 function chronal_mod:changeEntitiesInfos()
-  for k,v in ipairs(Isaac.GetRoomEntities()) do
-    for key,value in pairs(v) do
-      Isaac.DebugString(" found member : ".. key);
+  local ents = Isaac.GetRoomEntities();
+
+  for k,v in pairs(ents) do
+    Isaac.DebugString(k.." "..v.Type);
+    if v:IsEnemy() or v.Type == EntityType.ENTITY_PROJECTILE then
+      Isaac.DebugString("FREEZE !");
+      v:AddFreeze(EntityRef(player), 2);
+      if (v:IsBoss()) then
+        Isaac.DebugString("MEGA FREEZE !");
+        v:AddFreeze(EntityRef(v), 5);
+      end
     end
-    Isaac.DebugString("\n");
   end
+  Isaac.DebugString("\n");
 end
 
 function chronal_mod:rewind()
@@ -96,7 +123,9 @@ function chronal_mod:evaluateRewinding()
   if Input.IsActionPressed(ButtonAction.ACTION_ITEM, player.ControllerIndex) and player:GetActiveCharge() > -1 then
     rewinding = true;
     player.ControlsEnabled = false;
+    player.EntityCollisionClass = EntityCollisionClass.ENTCOLL_NONE;
   else
+    player.EntityCollisionClass = EntityCollisionClass.ENTCOLL_ALL;
     player.ControlsEnabled = true;
     rewinding = false; 
   end
@@ -198,7 +227,7 @@ function chronal_mod:debug_text()
   local player = Isaac.GetPlayer(0);
   Isaac.RenderText("Charges: " .. dataQueue.size, 400, 50, 255, 0, 0, 255)
   Isaac.RenderText("Frame: " .. debugText, 40, 65, 255, 255, 255, 255)
---  Isaac.RenderText("HP ".. player.HitPoints, 40, 75, 255, 255, 255, 255, 255);
+  Isaac.RenderText("BH ".. player:GetBlackHearts().." "..player:GetSoulHearts().." "..player:GetEternalHearts(), 40, 75, 255, 255, 255, 255, 255);
   Isaac.RenderText("Charged frames ".. chargeFrameCount, 40, 85, 255, 255, 255, 255, 255);
   Isaac.RenderText("Rewinding frames ".. framesPerCharge, 40, 100, 255, 255, 255, 255, 255);
   Isaac.RenderText("Rewinding ".. (rewinding == true and '1' or '0'), 400, 65, 255, 255, 255, 255, 255);
